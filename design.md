@@ -53,7 +53,7 @@ A physics-based sandbox web application for exploring interaction combinators an
 
 - Click-drag from one port to another to connect.
 - Wires are strings (not springs):
-  - Constant-length unless changed manually (mouse-up to lengthen/increase number of links, mouse-down to shorten/decrease number of links).
+  - Constant-length unless changed manually (mouse wheel up to lengthen the links, mouse wheel down to shorten the links).
   - Simulated via linkage/chain/rope-based physics.
   - Bezier curve rendered using linkages as guide.
   - Wires can be clicked-and-dragged from any point by the mouse, with physics simulating appropriate forces from the drag point.
@@ -197,3 +197,5 @@ Focus on function abstractions. Function definitions should not be more than a f
 Every file should have a clear, intuitive names. Files should NEVER have vague names like "store" or "utils".
 
 Before makeing any edits, make sure to look at the directory rather than proceeding based on an assumption.
+
+NEVER LEAVE HISTORICAL COMMENTS IN CODE! Never write something like "Removed" or "Unchanged" in a code comment. Just make a change, don't mention in the code itself that a change was made.

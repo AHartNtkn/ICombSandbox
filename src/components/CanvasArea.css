@@ -1,0 +1,14 @@
+#canvas-area {
+  position: relative; /* Needed for absolute positioning of children */
+  flex-grow: 1;
+  background-color: #242424;
+  padding: 10px;
+  overflow: auto;
+  touch-action: none; /* Prevent browser handling of gestures */
+}
+
+.canvas-node-wrapper {
+  /* position: absolute; is set inline */
+  cursor: grab; /* Indicate draggable */
+  /* Add styles for transitions or drag feedback later */
+} 

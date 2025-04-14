@@ -1,42 +1,161 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
+/* Styles for the main application layout */
+
+#app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh; /* Full viewport height */
+}
+
+#top-bar {
+  height: 50px; /* Fixed height for the top bar */
+  background-color: #333; /* Example background */
+  flex-shrink: 0; /* Prevent shrinking */
+  border-bottom: 1px solid #444;
+  /* Add styles for centering content */
+  display: flex;
+  align-items: center; /* Vertically center */
+  padding: 0 20px; /* Add horizontal padding */
+  justify-content: space-between; /* Pushes title left and controls right */
+}
+
+#main-content {
+  display: flex;
+  flex-grow: 1; /* Take remaining vertical space */
+  overflow: hidden; /* Prevent content overflow issues */
+}
+
+#left-sidebar {
+  width: 250px; /* Fixed width for the left sidebar */
+  background-color: #2a2a2a; /* Example background */
+  flex-shrink: 0; /* Prevent shrinking */
+  border-right: 1px solid #444;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.add-button {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1em;
+  cursor: pointer;
+  padding: 8px 12px;
   text-align: center;
+  margin-bottom: 15px;
+  transition: background-color 0.2s ease;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+.add-button:hover {
+  background-color: #0056b3;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.library-list {
+  list-style: none;
+  padding: 0;
+  margin: 0; /* Remove top margin from previous edit */
+  flex-grow: 1; /* Ensure it takes available space */
+  overflow-y: auto; /* Add scrollbar when content overflows */
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+.library-list li {
+  /* padding: 0; Remove padding if item handles it */
+  border-bottom: 1px solid #3a3a3a;
+  cursor: grab;
+  display: flex; /* Changed from centering */
+  justify-content: space-between; /* Align node left, button right */
+  align-items: center;
+  padding: 5px; /* Add padding back for spacing */
 }
 
-.card {
-  padding: 2em;
+/* Keep hover effect */
+.library-list li:hover {
+  background-color: #3f3f3f;
 }
 
-.read-the-docs {
-  color: #888;
+.library-list li:last-child {
+  border-bottom: none;
 }
+
+/* Style the container within the li if needed, but li itself works */
+.library-item {
+  /* Maybe not needed if li is styled directly */
+}
+
+.delete-node-button {
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 1.6em;
+  cursor: pointer;
+  padding: 0 5px;
+  margin-left: 5px; /* Space between node and button */
+  line-height: 1;
+  opacity: 0.5; /* Make it less prominent initially */
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+
+.library-item:hover .delete-node-button {
+  opacity: 1; /* Show button clearly on hover */
+}
+
+.delete-node-button:hover {
+  color: #ff6666; /* Reddish color on hover */
+  opacity: 1; /* Ensure full opacity on direct hover */
+}
+
+#canvas-area {
+  flex-grow: 1; /* Take remaining horizontal space */
+  background-color: #242424; /* Match default background */
+  padding: 10px;
+  overflow: auto; /* Allow scrolling if canvas is larger than area */
+}
+
+.title-display,
+.title-input {
+  color: #eee;
+  font-size: 1.4em;
+  font-weight: bold;
+  margin: 0; /* Reset default margins */
+  padding: 5px 8px;
+  border: 1px solid transparent; /* Reserve space for border */
+  border-radius: 4px;
+}
+
+.title-display {
+  cursor: pointer; /* Indicate it's clickable */
+}
+
+.title-display:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.title-input {
+  background-color: #444;
+  border: 1px solid #666;
+  outline: none;
+  width: 300px; /* Give the input a reasonable width */
+}
+
+.top-bar-controls {
+  display: flex;
+  gap: 10px; /* Space between buttons */
+}
+
+.control-button {
+  padding: 6px 12px;
+  font-size: 0.9em;
+  background-color: #4a4a4a;
+  color: #eee;
+  border: 1px solid #666;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.control-button:hover {
+  background-color: #5a5a5a;
+}
+
+/* Removed default Vite styles below this line */

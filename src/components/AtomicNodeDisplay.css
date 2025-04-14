@@ -1,0 +1,8 @@
+.atomic-node-display.sidebar-node {
+  display: flex;
+  justify-content: center; /* Center SVG horizontally */
+  align-items: center;
+  padding: 5px 0; /* Add some vertical padding */
+}
+
+/* Add other styles if needed for non-sidebar usage later */ 
