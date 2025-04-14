@@ -9,8 +9,9 @@ import {
 } from '@react-three/rapier';
 import * as THREE from 'three';
 import { Billboard, Text } from "@react-three/drei";
-import { AtomicNodeDefinition, CanvasNodeInstance, WireConnection } from '../types';
+import { AtomicNodeDefinition, CanvasNodeInstance, WireConnection, NodeOrBoundaryId, PortIndexOrId } from '../types';
 import RAPIER from '@dimforge/rapier3d-compat';
+import Port from './Port';
 
 // --- Constants for Visuals ---
 const NODE_RADIUS = 1.15;
@@ -28,9 +29,10 @@ interface PhysicsNodeProps {
   definition: AtomicNodeDefinition;
   wires: WireConnection[];
   onDelete: (instanceId: string) => void;
-  onPortPointerDown?: (instanceId: string, portIndex: number, portWorldPos: THREE.Vector3) => void;
-  onPortPointerEnter?: (instanceId: string, portIndex: number) => void;
-  onPortPointerLeave?: () => void;
+  onPortPointerDown?: (ownerId: NodeOrBoundaryId, portIdOrIndex: PortIndexOrId, worldPos: THREE.Vector3, event: ThreeEvent<PointerEvent>) => void;
+  onPortPointerEnter?: (ownerId: NodeOrBoundaryId, portIdOrIndex: PortIndexOrId, event: ThreeEvent<PointerEvent>) => void;
+  onPortPointerLeave?: (ownerId: NodeOrBoundaryId, portIdOrIndex: PortIndexOrId, event: ThreeEvent<PointerEvent>) => void;
+  onPortContextMenu?: (ownerId: NodeOrBoundaryId, portIdOrIndex: PortIndexOrId, event: ThreeEvent<MouseEvent>) => void;
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onUpdatePhysicsData?: (instanceId: string, position: THREE.Vector3, rotation: THREE.Quaternion) => void;
@@ -92,6 +94,7 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
     onPortPointerDown,
     onPortPointerEnter,
     onPortPointerLeave,
+    onPortContextMenu,
     onDragStart,
     onDragEnd,
     onUpdatePhysicsData
@@ -139,20 +142,16 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
       const angleStep = totalPorts > 0 ? 360 / totalPorts : 0;
 
       for (let i = 0; i < totalPorts; i++) {
-          const angle = 90 + i * angleStep;
-          const angleRad = angle * (Math.PI / 180);
+          const angleDegrees = 90 + i * angleStep;
+          const angleRad = angleDegrees * (Math.PI / 180);
 
-          // Start point on boundary
-          const startX = NODE_RADIUS * Math.cos(angleRad);
-          const startY = NODE_RADIUS * Math.sin(angleRad);
-          // End point of line
-          const endX = (NODE_RADIUS + PORT_LINE_LENGTH) * Math.cos(angleRad);
-          const endY = (NODE_RADIUS + PORT_LINE_LENGTH) * Math.sin(angleRad);
-          // Midpoint for cylinder
-          const midpointX = (startX + endX) / 2;
-          const midpointY = (startY + endY) / 2;
-          const length = PORT_LINE_LENGTH;
-          const rotationZ = angleRad + Math.PI / 2;
+          // Base position on the node's circumference
+          const baseX = NODE_RADIUS * Math.cos(angleRad);
+          const baseY = NODE_RADIUS * Math.sin(angleRad);
+
+          // Rotation for the port line (pointing outwards)
+          // We want rotation around Z axis
+          const rotation = new THREE.Euler(0, 0, angleRad - Math.PI / 2, 'XYZ'); // Adjust Euler order if needed
 
           // Check if this port is connected
           const isConnected = wires.some((w: WireConnection) =>
@@ -163,11 +162,8 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
           results.push({
               id: `port-${i}`,
               isPrincipal: i < definition.principalPorts,
-              position: [midpointX, midpointY, 0] as [number, number, number],
-              rotation: [0, 0, rotationZ] as [number, number, number],
-              length: length,
-              endPoint: [endX, endY, 0] as [number, number, number],
-              boundaryPoint: [startX, startY, 0] as [number, number, number],
+              basePosition: new THREE.Vector3(baseX, baseY, 0), // Base position on the node edge
+              rotation: rotation, // Euler rotation object
               isConnected: isConnected
           });
       }
@@ -441,49 +437,8 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
 
   const handleContextMenu = (event: ThreeEvent<MouseEvent>) => {
     console.log("Context Menu on node:", instance.instanceId);
-    event.stopPropagation();
-    event.nativeEvent.preventDefault();
-
-    // If a drag was in progress, cancel it
-    let wasDragging = false;
-    if (isDraggingRef.current) {
-        wasDragging = true;
-        isDraggingRef.current = false;
-
-        // Clean up shift-dragging if active
-        if (isShiftDraggingRef.current) {
-            isShiftDraggingRef.current = false;
-            if (rigidBodyRef.current) {
-                rigidBodyRef.current.setBodyType(0, true); // Reset to dynamic
-                rigidBodyRef.current.wakeUp();
-            }
-            setIsShiftDragging(false);
-        }
-        // Clean up joint-dragging if active
-        else if (activeJointRef.current) {
-             try {
-                 world.removeImpulseJoint(activeJointRef.current.joint, true);
-                 if (activeJointRef.current.anchorBody && world.bodies.get(activeJointRef.current.anchorBody.handle)) {
-                      world.removeRigidBody(activeJointRef.current.anchorBody);
-                 }
-             } catch (e) {
-                 console.error("Error cleaning up joint on context menu:", e);
-             } finally {
-                 activeJointRef.current = null;
-                 rigidBodyRef.current?.wakeUp();
-             }
-        }
-
-        // Remove event listeners ONLY if we were dragging
-        window.removeEventListener('mousemove', handleGlobalMouseMove);
-        window.removeEventListener('mouseup', handleGlobalMouseUp);
-
-        // Notify parent drag ended due to context menu cancel
-        onDragEnd?.();
-    }
-
-    // Proceed with deletion
-    onDelete(instance.instanceId);
+    // No longer directly deletes, calls unified handler
+    onPortContextMenu?.(instance.instanceId, -1, event); // Pass instanceId, -1 for port index (node context), and event
   };
 
   const handlePortPointerDown = (event: ThreeEvent<PointerEvent>, portIndex: number) => {
@@ -491,19 +446,22 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
     const portMesh = event.object as THREE.Mesh;
     const worldPos = new THREE.Vector3();
     portMesh.getWorldPosition(worldPos);
-    onPortPointerDown?.(instance.instanceId, portIndex, worldPos);
+    // Call unified handler with node ownerId and numeric portIndex
+    onPortPointerDown?.(instance.instanceId, portIndex, worldPos, event);
   };
 
   const handlePortPointerEnter = (event: ThreeEvent<PointerEvent>, portIndex: number) => {
     event.stopPropagation();
     setHoveredPortIndex(portIndex);
-    onPortPointerEnter?.(instance.instanceId, portIndex);
+    // Call unified handler
+    onPortPointerEnter?.(instance.instanceId, portIndex, event);
   };
 
-  const handlePortPointerLeave = (event: ThreeEvent<PointerEvent>) => {
+  const handlePortPointerLeave = (event: ThreeEvent<PointerEvent>, portIndex: number) => {
     event.stopPropagation();
     setHoveredPortIndex(null);
-    onPortPointerLeave?.();
+    // Call unified handler
+    onPortPointerLeave?.(instance.instanceId, portIndex, event);
   };
 
   return (
@@ -533,29 +491,26 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
              <meshStandardMaterial color={definition.color} emissive={definition.color} emissiveIntensity={0.2} side={THREE.DoubleSide} />
         </mesh>
 
-        {/* Ports */}
-        {portData.map((port, originalIndex) => (
-             !port.isConnected && (
-                 <mesh
-                    key={port.id}
-                    position={port.position}
-                    rotation={port.rotation}
-                    onPointerDown={(e) => handlePortPointerDown(e, originalIndex)}
-                    onPointerEnter={(e) => handlePortPointerEnter(e, originalIndex)}
-                    onPointerLeave={handlePortPointerLeave}
-                 >
-                     <cylinderGeometry args={[PORT_LINE_RADIUS, PORT_LINE_RADIUS, port.length, 8]} />
-                     <meshStandardMaterial color={hoveredPortIndex === originalIndex ? 'yellow' : '#ccc'} />
-                 </mesh>
-             )
-        ))}
-
-        {/* Principal Port Markers */}
-        {portData.filter(p => p.isPrincipal).map(port => (
-             <mesh key={`${port.id}-marker`} position={port.boundaryPoint}>
-                  <sphereGeometry args={[PRINCIPAL_MARKER_RADIUS, 8, 8]} />
-                  <meshStandardMaterial color="black" />
-             </mesh>
+        {/* Ports (Now render generic Port component) */}
+        {portData.map((portInfo, originalIndex) => (
+            <Port
+                key={portInfo.id}
+                ownerId={instance.instanceId}
+                portIdOrIndex={originalIndex}
+                position={portInfo.basePosition} // Base position relative to node center
+                rotation={portInfo.rotation}    // Rotation object
+                length={PORT_LINE_LENGTH}     // Use constant length for now
+                lineRadius={PORT_LINE_RADIUS} // Use constant radius
+                dotRadius={PRINCIPAL_MARKER_RADIUS} // Use principal marker radius for dot
+                isConnected={portInfo.isConnected}
+                isPrincipal={portInfo.isPrincipal} // Pass principal status
+                // Pass unified handlers down
+                onPointerDown={onPortPointerDown}
+                onPointerEnter={onPortPointerEnter}
+                onPointerLeave={onPortPointerLeave}
+                onContextMenu={onPortContextMenu} 
+                // Add visual config if needed (radius, color)
+            />
         ))}
       </group>
 

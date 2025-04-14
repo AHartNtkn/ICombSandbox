@@ -415,7 +415,7 @@ const PhysicsWire: React.FC<PhysicsWireProps> = ({
         }
 
         const change = -scrollDelta * sensitivity;
-        let newLength = Math.max(minLength, Math.min(maxLength, currentLength + change));
+        let newLength = Math.max(minLength, Math.min(maxLength, currentLength - change));
 
         // Only update if the length actually changes significantly (optional)
         if (Math.abs(newLength - currentLength) > 0.001) {

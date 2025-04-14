@@ -1,7 +1,7 @@
 import React, { useState, ChangeEvent, KeyboardEvent, FocusEvent, useRef, useCallback } from 'react';
 import * as THREE from 'three'; // Import THREE
 import './App.css'
-import { WorkspaceData, AtomicNodeDefinition, CanvasNodeInstance, WireConnection, DrawingWireState } from './types'; // Import WireConnection
+import { WorkspaceData, AtomicNodeDefinition, CanvasNodeInstance, WireConnection, DrawingWireState, NodeOrBoundaryId, PortIndexOrId, BoundaryPort } from './types'; // Import WireConnection
 import LeftSidebar from './components/LeftSidebar'; // Import new component
 import CanvasArea from './components/CanvasArea'; // Import new component
 import { getPortBoundaryLocalOffset } from './utils/geometry'; // Import utility
@@ -15,6 +15,8 @@ function App() {
   const [wires, setWires] = useState<WireConnection[]>([]); // State for wires
   const [drawingWire, setDrawingWire] = useState<DrawingWireState | null>(null); // State for temporary wire
   const isFinishingWire = useRef(false); // Add ref to prevent double execution
+  const [isBoundaryActive, setIsBoundaryActive] = useState<boolean>(false);
+  const [boundaryPorts, setBoundaryPorts] = useState<BoundaryPort[]>([]);
 
   // Ref to store node positions/rotations for length calculation
   // We might need a more robust way if nodes aren't rendered immediately
@@ -90,14 +92,14 @@ function App() {
     );
   }, [setCanvasNodes, setWires]); // Add setWires as dependency
 
-  // --- Wire Handling ---
-  // Need startX/Y and currentMouseX/Y again for the visual line
-  const startWire = useCallback((sourceNodeId: string, sourcePortIndex: number, startX: number, startY: number, currentMouseX: number, currentMouseY: number) => {
+  // --- Wire Handling (Updated for Boundary Source) ---
+  // startWire now accepts boundary source types
+  const startWire = useCallback((sourceNodeId: NodeOrBoundaryId, sourcePortIndex: PortIndexOrId, startX: number, startY: number, currentMouseX: number, currentMouseY: number) => {
     console.log(`Start wire from ${sourceNodeId} port ${sourcePortIndex}`);
-    // Store all coordinates in state again
+    // Set state regardless of source type
     setDrawingWire({
-        sourceNodeId,
-        sourcePortIndex,
+        sourceNodeId: sourceNodeId,
+        sourcePortIndex: sourcePortIndex,
         startX,
         startY,
         endX: currentMouseX,
@@ -112,98 +114,80 @@ function App() {
     setDrawingWire(prev => prev ? { ...prev, endX: currentMouseX, endY: currentMouseY } : null);
   }, [drawingWire]);
 
-  const finishWire = useCallback((targetNodeId: string | null, targetPortIndex: number | null) => {
-    // Prevent re-entry flag check
-    if (isFinishingWire.current) {
-      console.log("finishWire called while already finishing. Skipping.");
-      return;
-    }
+  // finishWire refactored for Boundary source/target
+  const finishWire = useCallback((targetNodeId: NodeOrBoundaryId | null, targetPortIndex: PortIndexOrId | null) => {
+    if (isFinishingWire.current) return;
     isFinishingWire.current = true;
 
     const currentDrawingWire = drawingWire;
-    setDrawingWire(null); // Clear drawing state immediately
+    setDrawingWire(null);
 
     if (!currentDrawingWire) {
-      console.log("finishWire called but drawingWire was already null. Skipping.");
-      isFinishingWire.current = false; // Reset flag
-      return;
-    }
-    console.log(`Finish wire. Target: ${targetNodeId} port ${targetPortIndex}`);
-
-    const sourceNodeId = currentDrawingWire.sourceNodeId;
-    const sourcePortIndex = currentDrawingWire.sourcePortIndex;
-
-    // --- Perform Validation BEFORE setWires ---
-    let isValidTarget = targetNodeId !== null && targetPortIndex !== null && targetNodeId !== sourceNodeId;
-    let isSourcePortOccupied = false;
-    let isTargetPortOccupied = false;
-
-    if (isValidTarget) {
-      // Use the component's `wires` state for validation
-      isSourcePortOccupied = wires.some(w =>
-        (w.sourceNodeId === sourceNodeId && w.sourcePortIndex === sourcePortIndex) ||
-        (w.targetNodeId === sourceNodeId && w.targetPortIndex === sourcePortIndex)
-      );
-      isTargetPortOccupied = wires.some(w =>
-        (w.sourceNodeId === targetNodeId && w.sourcePortIndex === targetPortIndex) ||
-        (w.targetNodeId === targetNodeId && w.targetPortIndex === targetPortIndex)
-      );
+        console.log("finishWire called but drawingWire was null. Skipping.");
+        isFinishingWire.current = false;
+        return;
     }
 
-    // Log validation results *before* setWires
-    console.log(`finishWire Validation BEFORE setWires: isValidTarget=${isValidTarget}, isSourceOccupied=${isSourcePortOccupied}, isTargetOccupied=${isTargetPortOccupied}`);
+    const { sourceNodeId, sourcePortIndex } = currentDrawingWire;
+    console.log(`Finish wire. Source: ${sourceNodeId}:${sourcePortIndex}, Target: ${targetNodeId}:${targetPortIndex}`);
 
-    // --- Update State ONLY if Validation Passes ---
-    if (isValidTarget && !isSourcePortOccupied && !isTargetPortOccupied) {
-      // --- Calculate Initial Length ---
-      let initialLength: number | null = null;
-      const sourceNodeDef = atomicNodes.find(def => canvasNodes.find(cn => cn.instanceId === sourceNodeId)?.definitionId === def.id);
-      const targetNodeDef = atomicNodes.find(def => canvasNodes.find(cn => cn.instanceId === targetNodeId)?.definitionId === def.id);
-      const sourcePhysData = nodePhysicsData.current.get(sourceNodeId);
-      const targetPhysData = nodePhysicsData.current.get(targetNodeId!);
-
-      if (sourceNodeDef && targetNodeDef && sourcePhysData && targetPhysData) {
-          const sourceLocalOffset = getPortBoundaryLocalOffset(sourceNodeDef, sourcePortIndex);
-          const targetLocalOffset = getPortBoundaryLocalOffset(targetNodeDef, targetPortIndex!);
-
-          const sourcePos = sourcePhysData.position.clone()
-              .add(sourceLocalOffset.clone().applyQuaternion(sourcePhysData.rotation));
-          const targetPos = targetPhysData.position.clone()
-              .add(targetLocalOffset.clone().applyQuaternion(targetPhysData.rotation));
-
-          initialLength = sourcePos.distanceTo(targetPos);
-          console.log("Calculated initial wire length:", initialLength);
-      } else {
-          console.warn("Could not get all data needed to calculate initial wire length.");
-      }
-      // --- End Calculate Initial Length ---
-
-      const newWire: WireConnection = {
-        id: `wire_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-        sourceNodeId: sourceNodeId,
-        sourcePortIndex: sourcePortIndex,
-        targetNodeId: targetNodeId!,
-        targetPortIndex: targetPortIndex!,
-        targetLength: initialLength, // Set initial length
-      };
-      console.log("Wire created:", newWire);
-      setWires(currentWires => [...currentWires, newWire]);
+    // --- Rule out invalid combinations --- 
+    if (targetNodeId === null || targetPortIndex === null) {
+        console.log("Wire cancelled: No valid target.");
+    } else if (sourceNodeId === targetNodeId && sourcePortIndex === targetPortIndex) {
+        console.log("Wire connection failed: Cannot connect port to itself.");
     } else {
-       // Log failure reason based on the validation done above
-       let reason = "Cancelled or invalid target.";
-       if (!isValidTarget) reason = `Invalid target: ${targetNodeId}, ${targetPortIndex}`;
-       else if (isSourcePortOccupied) reason = "Source port already connected.";
-       else if (isTargetPortOccupied) reason = "Target port already connected.";
-       console.log(`Wire connection failed: ${reason}`);
-       // No state update needed if validation failed
+        // --- Check Port Occupancy --- 
+        const isSourceOccupied = wires.some(w =>
+            (w.sourceNodeId === sourceNodeId && w.sourcePortIndex === sourcePortIndex) ||
+            (w.targetNodeId === sourceNodeId && w.targetPortIndex === sourcePortIndex)
+        );
+        const isTargetOccupied = wires.some(w =>
+            (w.sourceNodeId === targetNodeId && w.sourcePortIndex === targetPortIndex) ||
+            (w.targetNodeId === targetNodeId && w.targetPortIndex === targetPortIndex)
+        );
+
+        if (isSourceOccupied) {
+            console.log("Wire connection failed: Source port already connected.");
+        } else if (isTargetOccupied) {
+            console.log("Wire connection failed: Target port already connected.");
+        } else {
+            // --- Create Wire (Validation passed) --- 
+            let initialLength: number | null = null;
+            // Calculate length ONLY for node-to-node connections
+            if (sourceNodeId !== 'BOUNDARY' && targetNodeId !== 'BOUNDARY') {
+                const sourceNodeDef = atomicNodes.find(def => canvasNodes.find(cn => cn.instanceId === sourceNodeId)?.definitionId === def.id);
+                const targetNodeDef = atomicNodes.find(def => canvasNodes.find(cn => cn.instanceId === targetNodeId)?.definitionId === def.id);
+                const sourcePhysData = nodePhysicsData.current.get(sourceNodeId as string); // Cast safe
+                const targetPhysData = nodePhysicsData.current.get(targetNodeId as string); // Cast safe
+
+                if (sourceNodeDef && targetNodeDef && sourcePhysData && targetPhysData) {
+                    const sourceLocalOffset = getPortBoundaryLocalOffset(sourceNodeDef, sourcePortIndex as number); // Cast safe
+                    const targetLocalOffset = getPortBoundaryLocalOffset(targetNodeDef, targetPortIndex as number); // Cast safe
+                    const sourcePos = sourcePhysData.position.clone().add(sourceLocalOffset.clone().applyQuaternion(sourcePhysData.rotation));
+                    const targetPos = targetPhysData.position.clone().add(targetLocalOffset.clone().applyQuaternion(targetPhysData.rotation));
+                    initialLength = sourcePos.distanceTo(targetPos);
+                    console.log("Calculated node-to-node wire length:", initialLength);
+                }
+            }
+
+            const newWire: WireConnection = {
+                id: `wire_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+                sourceNodeId: sourceNodeId,
+                sourcePortIndex: sourcePortIndex,
+                targetNodeId: targetNodeId,
+                targetPortIndex: targetPortIndex,
+                targetLength: initialLength,
+            };
+            console.log("Wire created:", newWire);
+            setWires(currentWires => [...currentWires, newWire]);
+        }
     }
 
     // Reset the re-entry flag
-    setTimeout(() => {
-      isFinishingWire.current = false;
-    }, 0);
+    setTimeout(() => { isFinishingWire.current = false; }, 0);
 
-  }, [drawingWire, wires, setWires, setDrawingWire, atomicNodes, canvasNodes]); // Added atomicNodes, canvasNodes dependencies
+  }, [drawingWire, wires, setWires, atomicNodes, canvasNodes]); // Removed setDrawingWire (handled internally)
 
   // deleteWire depends only on setWires (stable)
   const deleteWire = useCallback((wireIdToDelete: string) => {
@@ -323,7 +307,46 @@ function App() {
     };
     reader.readAsText(file);
   };
-  // --- End Import/Export Handlers ---
+
+  const toggleBoundary = useCallback(() => {
+    setIsBoundaryActive(prev => {
+      const becomingActive = !prev;
+      if (!becomingActive) {
+        const boundaryPortIds = new Set(boundaryPorts.map(p => p.id));
+        setWires(currentWires =>
+          currentWires.filter(w =>
+            !(w.sourceNodeId === 'BOUNDARY' && boundaryPortIds.has(w.sourcePortIndex as string)) &&
+            !(w.targetNodeId === 'BOUNDARY' && boundaryPortIds.has(w.targetPortIndex as string))
+          )
+        );
+        setBoundaryPorts([]);
+        console.log("Boundary deactivated, ports and wires cleared.");
+      } else {
+        console.log("Boundary activated.");
+      }
+      return becomingActive;
+    });
+  }, [boundaryPorts, setBoundaryPorts, setWires]);
+
+  const addBoundaryPort = useCallback((newPort: BoundaryPort) => {
+    if (!isBoundaryActive) {
+        console.warn("Attempted to add boundary port while boundary is inactive.");
+        return;
+    }
+    setBoundaryPorts(prev => [...prev, newPort]);
+    console.log("Added boundary port:", newPort);
+  }, [isBoundaryActive, setBoundaryPorts]);
+
+  const deleteBoundaryPort = useCallback((portIdToDelete: string) => {
+    setBoundaryPorts(prev => prev.filter(p => p.id !== portIdToDelete));
+    setWires(currentWires =>
+      currentWires.filter(w =>
+        !(w.sourceNodeId === 'BOUNDARY' && w.sourcePortIndex === portIdToDelete) &&
+        !(w.targetNodeId === 'BOUNDARY' && w.targetPortIndex === portIdToDelete)
+      )
+    );
+    console.log("Deleted boundary port and connected wires:", portIdToDelete);
+  }, [setBoundaryPorts, setWires]);
 
   return (
     <div id="app-container">
@@ -346,6 +369,9 @@ function App() {
         <div className="top-bar-controls">
           <button onClick={handleImportClick} className="control-button">Import</button>
           <button onClick={handleExport} className="control-button">Export</button>
+          <button onClick={toggleBoundary} className="control-button">
+            {isBoundaryActive ? 'Hide Boundary' : 'Show Boundary'}
+          </button>
         </div>
         {/* Hidden File Input */}
         <input
@@ -362,22 +388,25 @@ function App() {
           atomicNodes={atomicNodes}
           onAddAtomicNode={addAtomicNode}
           onDeleteAtomicNode={deleteAtomicNode}
-          wires={wires}
         />
         <CanvasArea
           atomicNodeDefs={atomicNodes}
           canvasNodes={canvasNodes}
           wires={wires}
+          drawingWire={drawingWire}
           onAddNode={addNodeToCanvas}
           onDeleteNode={deleteCanvasNode}
-          drawingWire={drawingWire}
           onStartWire={startWire}
           onUpdateWireEnd={updateWireEnd}
           onFinishWire={finishWire}
           onDeleteWire={deleteWire}
-          onUpdateWireLength={handleUpdateWireLength} // Pass down the handler
-          // Pass down node physics update handler
+          onUpdateWireLength={handleUpdateWireLength}
           onUpdateNodePhysicsData={updateNodePhysicsData}
+          isBoundaryActive={isBoundaryActive}
+          boundaryPorts={boundaryPorts}
+          addBoundaryPort={addBoundaryPort}
+          deleteBoundaryPort={deleteBoundaryPort}
+          setWires={setWires}
         />
       </div>
     </div>

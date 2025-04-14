@@ -6,12 +6,11 @@ import AtomicNodeDisplay from './AtomicNodeDisplay'; // Import the display compo
 
 interface LeftSidebarProps {
   atomicNodes: AtomicNodeDefinition[];
-  wires: WireConnection[];
   onAddAtomicNode: (newNode: AtomicNodeDefinition) => void;
   onDeleteAtomicNode: (definitionId: string) => void;
 }
 
-const LeftSidebar: React.FC<LeftSidebarProps> = ({ atomicNodes, wires, onAddAtomicNode, onDeleteAtomicNode }) => {
+const LeftSidebar: React.FC<LeftSidebarProps> = ({ atomicNodes, onAddAtomicNode, onDeleteAtomicNode }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const openModal = () => setIsModalOpen(true);

@@ -15,13 +15,25 @@ export interface CanvasNodeInstance {
   // Add metadata values state later
 }
 
+// ---> NEW: Boundary Types
+export interface BoundaryPort {
+  id: string; // Unique ID, e.g., "boundary_port_123"
+  x: number; // Position on the boundary circle (world coords)
+  y: number;
+  angle: number; // Angle on the circle (radians) - relative to positive x-axis
+}
+
+export type NodeOrBoundaryId = string | 'BOUNDARY';
+export type PortIndexOrId = number | string; // Number for node port index, string for boundary port ID
+// <--- END NEW
+
 export interface WireConnection {
   id: string;
-  sourceNodeId: string;
-  sourcePortIndex: number;
-  targetNodeId: string;
-  targetPortIndex: number;
-  targetLength?: number | null; // Add optional target length
+  sourceNodeId: NodeOrBoundaryId;     // Updated
+  sourcePortIndex: PortIndexOrId;    // Updated
+  targetNodeId: NodeOrBoundaryId;     // Updated
+  targetPortIndex: PortIndexOrId;    // Updated
+  targetLength?: number | null;
 }
 
 // Add and export DrawingWireState
@@ -29,9 +41,9 @@ export interface WireConnection {
 // Coordinates are no longer needed as the physics engine handles the connection.
 // ^^^ REVERTING THIS: Coordinates *are* needed for visual feedback line
 export interface DrawingWireState {
-    sourceNodeId: string;
-    sourcePortIndex: number;
-    // Add back coordinates needed for the temporary drawing line
+    sourceNodeId: NodeOrBoundaryId;    // Updated
+    sourcePortIndex: PortIndexOrId;   // Updated
+    // Coordinates for the visual line remain the same
     startX: number;
     startY: number;
     endX: number;
