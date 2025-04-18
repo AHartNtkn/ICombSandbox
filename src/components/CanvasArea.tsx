@@ -4,7 +4,7 @@ import { Physics, RapierRigidBody } from '@react-three/rapier';
 import { OrbitControls, Line } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
-import { AtomicNodeDefinition, CanvasNodeInstance, WireConnection, DrawingWireState, BoundaryPort, NodeOrBoundaryId, PortIndexOrId } from '../types';
+import { AtomicNodeDefinition, CanvasNodeInstance, WireConnection, DrawingWireState, BoundaryPort, NodeOrBoundaryId, PortIndexOrId, DefinitionDefinition } from '../types';
 import { getPortBoundaryLocalOffset } from '../utils/geometry';
 import PhysicsNode from './PhysicsNode';
 import ManualDrawingLine from './ManualDrawingLine';
@@ -15,6 +15,7 @@ import { ThreeEvent } from '@react-three/fiber';
 
 interface CanvasAreaProps {
   atomicNodeDefs: AtomicNodeDefinition[];
+  definitionDefs: DefinitionDefinition[];
   canvasNodes: CanvasNodeInstance[];
   wires: WireConnection[];
   drawingWire: DrawingWireState | null;
@@ -31,6 +32,8 @@ interface CanvasAreaProps {
   addBoundaryPort: (port: BoundaryPort) => void;
   deleteBoundaryPort: (portId: string) => void;
   setWires: Dispatch<SetStateAction<WireConnection[]>>;
+  onAddDefinitionClick: () => void;
+  onExpandDefinition?: (instanceId: string) => void;
 }
 
 // Helper function to manage orbit controls enabling/disabling
@@ -48,55 +51,47 @@ const useDragControls = (setControlsEnabled: React.Dispatch<React.SetStateAction
   return { handleDragStart, handleDragEnd };
 };
 
-const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, canvasNodes, wires, drawingWire, onAddNode, onDeleteNode, onStartWire, onUpdateWireEnd, onFinishWire, onDeleteWire, onUpdateWireLength, onUpdateNodePhysicsData, isBoundaryActive, boundaryPorts, addBoundaryPort, deleteBoundaryPort, setWires }) => {
+const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, definitionDefs, canvasNodes, wires, drawingWire, onAddNode, onDeleteNode, onStartWire, onUpdateWireEnd, onFinishWire, onDeleteWire, onUpdateWireLength, onUpdateNodePhysicsData, isBoundaryActive, boundaryPorts, addBoundaryPort, deleteBoundaryPort, setWires, onAddDefinitionClick, onExpandDefinition }) => {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const wireTargetRef = useRef<{ nodeId: NodeOrBoundaryId; portIndex: PortIndexOrId } | null>(null);
 
   const r3fStateRef = useRef<{ camera: THREE.OrthographicCamera, raycaster: THREE.Raycaster } | null>(null);
   const [currentZoom, setCurrentZoom] = useState<number>(50);
 
-  // Store refs to the PhysicsNode components
+  // Store refs to the PhysicsNode components using a ref map
   const nodeRefs = useRef<Map<string, React.RefObject<RapierRigidBody>>>(new Map());
   // ---> NEW: Store refs for boundary port physics bodies
   const boundaryPortBodyRefs = useRef<Map<string, React.RefObject<RapierRigidBody | null>>>(new Map());
   // <--- END NEW
 
-  // Callback to store/remove node refs
-  const handleNodeRefUpdate = useCallback((instanceId: string, ref: React.RefObject<RapierRigidBody>) => {
-    // console.log(`CanvasArea: Updating ref for node ${instanceId}`, ref);
-    nodeRefs.current.set(instanceId, ref);
-    // Trigger a re-render if needed, maybe via state, though passing refs directly might suffice
+  // ---> NEW: State to trigger re-renders when refs become ready/destroyed
+  const [refsReadyTrigger, setRefsReadyTrigger] = useState(0);
+
+  const handleRefReady = useCallback((instanceId: string, ref: React.RefObject<RapierRigidBody | null>) => {
+    if (ref.current) { // Only store if the ref.current is valid
+        console.log(`[CanvasArea handleRefReady] Ref ready for ${instanceId}`);
+        nodeRefs.current.set(instanceId, ref as React.RefObject<RapierRigidBody>); // Cast is safe here
+        // Trigger re-render to ensure components using the ref update
+        setRefsReadyTrigger(prev => prev + 1);
+    } else {
+        console.warn(`[CanvasArea handleRefReady] Received ready signal for ${instanceId}, but ref.current is null.`);
+    }
   }, []);
 
-  // Cleanup ref when node is deleted
-  useEffect(() => {
-      const currentKeys = new Set(canvasNodes.map(n => n.instanceId));
-      const refsToDelete: string[] = [];
-      nodeRefs.current.forEach((_, key) => {
-          if (!currentKeys.has(key)) {
-              refsToDelete.push(key);
-          }
-      });
-      if (refsToDelete.length > 0) {
-          // console.log("CanvasArea: Cleaning up refs for nodes:", refsToDelete);
-          refsToDelete.forEach(key => nodeRefs.current.delete(key));
-          // Force update if necessary, maybe not needed if PhysicsWire only depends on props
-      }
-  }, [canvasNodes]);
-
-  // ---> NEW: Callbacks for Boundary to register/unregister its port body refs
-  const registerBoundaryPortBodyRef = useCallback((portId: string, ref: React.RefObject<RapierRigidBody | null>) => {
-      // console.log(`CanvasArea: Registering boundary port ref ${portId}`);
-      boundaryPortBodyRefs.current.set(portId, ref);
-  }, []);
-
-  const unregisterBoundaryPortBodyRef = useCallback((portId: string) => {
-      // console.log(`CanvasArea: Unregistering boundary port ref ${portId}`);
-      boundaryPortBodyRefs.current.delete(portId);
+  const handleRefDestroyed = useCallback((instanceId: string) => {
+    console.log(`[CanvasArea handleRefDestroyed] Ref destroyed for ${instanceId}`);
+    const deleted = nodeRefs.current.delete(instanceId);
+    if (deleted) {
+         // Optionally trigger re-render if deletion needs to reflect immediately
+         // setRefsReadyTrigger(prev => prev + 1);
+    }
   }, []);
   // <--- END NEW
 
   const getMousePlanePosFromEvent = useCallback((event: MouseEvent | PointerEvent): THREE.Vector3 | null => {
+    // Log available refs at the start of render
+    console.log("[CanvasArea Render Start] nodeRefs keys:", Array.from(nodeRefs.current.keys()), "boundaryPortBodyRefs keys:", Array.from(boundaryPortBodyRefs.current.keys()));
+
     if (!r3fStateRef.current || !canvasContainerRef.current) return null;
     const { camera, raycaster } = r3fStateRef.current;
     const bounds = canvasContainerRef.current.getBoundingClientRect();
@@ -271,9 +266,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, canvasNodes, wi
       // If a drag starts immediately after (e.g., node drag), handleDragStart will disable them again.
   }, [drawingWire]);
 
-  const findDefinition = useCallback((defId: string): AtomicNodeDefinition | undefined => {
+  const findAtomicDef = useCallback((defId: string): AtomicNodeDefinition | undefined => {
     return atomicNodeDefs.find(def => def.id === defId);
   }, [atomicNodeDefs]);
+
+  // ---> NEW: Find definition definition
+  const findDefinitionDef = useCallback((defId: string): DefinitionDefinition | undefined => {
+    return definitionDefs.find(def => def.id === defId);
+  }, [definitionDefs]);
+  // --- <------
 
   // --- Drag and Drop Handler --- // Moved setup outside return
   const getDropWorldPos = useCallback((event: React.DragEvent<HTMLDivElement>): THREE.Vector3 | null => {
@@ -353,6 +354,16 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, canvasNodes, wi
   };
   // <--- END NEW
 
+  // ---> NEW: Callbacks for Boundary to register/unregister its port body refs
+  const registerBoundaryPortBodyRef = useCallback((portId: string, ref: React.RefObject<RapierRigidBody | null>) => {
+      // console.log(`CanvasArea: Registering boundary port ref ${portId}`);
+      boundaryPortBodyRefs.current.set(portId, ref);
+  }, []);
+
+  const unregisterBoundaryPortBodyRef = useCallback((portId: string) => {
+      boundaryPortBodyRefs.current.delete(portId);
+  }, []);
+
   return (
     <div
       id="canvas-area"
@@ -411,17 +422,18 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, canvasNodes, wi
         <Suspense fallback={null}>
           <Physics gravity={[0, 0, 0]}>
             {canvasNodes.map(instance => {
-              const definition = findDefinition(instance.definitionId);
-              if (!definition) return null;
-              // Ensure a ref exists for each node
-              if (!nodeRefs.current.has(instance.instanceId)) {
-                   nodeRefs.current.set(instance.instanceId, React.createRef<RapierRigidBody>() as React.RefObject<RapierRigidBody>);
+              const definition = instance.isDefinitionInstance
+                ? findDefinitionDef(instance.definitionId)
+                : findAtomicDef(instance.definitionId);
+
+              if (!definition) {
+                console.warn(`Could not find definition (atomic or definition) for instance ${instance.instanceId} with defId ${instance.definitionId}`);
+                return null;
               }
-              const nodeRef = nodeRefs.current.get(instance.instanceId)!;
+              // No need to pre-create refs here, handleRefReady manages the map
               return (
                 <PhysicsNode
                   key={instance.instanceId}
-                  ref={nodeRef}
                   instance={instance}
                   definition={definition}
                   wires={wires}
@@ -433,26 +445,38 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, canvasNodes, wi
                   onDragStart={handleDragStart}
                   onDragEnd={handleDragEnd}
                   onUpdatePhysicsData={onUpdateNodePhysicsData}
+                  onDoubleClick={onExpandDefinition}
+                  onRefReady={handleRefReady}
+                  onRefDestroyed={handleRefDestroyed}
                 />
               );
             })}
             {wires.map(wire => {
                 let sourceRef: React.RefObject<RapierRigidBody | null> | undefined = undefined;
                 let targetRef: React.RefObject<RapierRigidBody | null> | undefined = undefined;
-                let sourceDef: AtomicNodeDefinition | undefined = undefined;
-                let targetDef: AtomicNodeDefinition | undefined = undefined;
+                let sourceDef: AtomicNodeDefinition | DefinitionDefinition | undefined = undefined;
+                let targetDef: AtomicNodeDefinition | DefinitionDefinition | undefined = undefined;
                 let sourcePortIdx: number = 0; // Default, will be overwritten
                 let targetPortIdx: number = 0; // Default, will be overwritten
-                let skip = false;
 
                 // --- Determine Source Ref and Definition ---
+                console.log(`[CanvasArea Render] Processing wire ${wire.id} (${wire.sourceNodeId} -> ${wire.targetNodeId})`);
                 if (wire.sourceNodeId === 'BOUNDARY') {
                     sourceRef = boundaryPortBodyRefs.current.get(wire.sourcePortIndex as string);
                     sourceDef = DUMMY_BOUNDARY_DEFINITION;
                     // sourcePortIdx remains 0 (not used for boundary dummy)
                 } else {
+                    // Find the instance first
+                    const sourceInstance = canvasNodes.find(n => n.instanceId === wire.sourceNodeId);
+                    console.log(`[CanvasArea Render] Wire ${wire.id}: Found source instance ${wire.sourceNodeId}?`, !!sourceInstance);
                     sourceRef = nodeRefs.current.get(wire.sourceNodeId as string);
-                    sourceDef = findDefinition(canvasNodes.find(n => n.instanceId === wire.sourceNodeId)?.definitionId ?? '');
+                    if (sourceInstance) {
+                        sourceDef = sourceInstance.isDefinitionInstance
+                            ? findDefinitionDef(sourceInstance.definitionId)
+                            : findAtomicDef(sourceInstance.definitionId);
+                    } else {
+                        console.warn(`Wire ${wire.id} source instance ${wire.sourceNodeId} not found.`);
+                    }
                     sourcePortIdx = wire.sourcePortIndex as number; // Is a number for nodes
                 }
 
@@ -462,18 +486,40 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, canvasNodes, wi
                     targetDef = DUMMY_BOUNDARY_DEFINITION;
                     // targetPortIdx remains 0 (not used for boundary dummy)
                 } else {
+                    // Find the instance first
+                    const targetInstance = canvasNodes.find(n => n.instanceId === wire.targetNodeId);
+                    console.log(`[CanvasArea Render] Wire ${wire.id}: Found target instance ${wire.targetNodeId}?`, !!targetInstance);
                     targetRef = nodeRefs.current.get(wire.targetNodeId as string);
-                    targetDef = findDefinition(canvasNodes.find(n => n.instanceId === wire.targetNodeId)?.definitionId ?? '');
+                    if (targetInstance) {
+                        targetDef = targetInstance.isDefinitionInstance
+                            ? findDefinitionDef(targetInstance.definitionId)
+                            : findAtomicDef(targetInstance.definitionId);
+                    } else {
+                        console.warn(`Wire ${wire.id} target instance ${targetInstance} not found.`);
+                    }
                     targetPortIdx = wire.targetPortIndex as number; // Is a number for nodes
                 }
 
-                // --- Validation --- 
-                if (!sourceRef || !sourceRef.current || !targetRef || !targetRef.current) {
-                    // console.warn(`Skipping wire ${wire.id}: Missing physics body refs.`);
+                // --- NEW CHECK: Ensure refs are populated before rendering wire ---
+                // Re-lookup refs based on IDs determined above
+                console.log(`[CanvasArea Render Wire ${wire.id}] Checking refs. Source expects: ${wire.sourceNodeId}, Target expects: ${wire.targetNodeId}`);
+                const currentSourceRef = wire.sourceNodeId === 'BOUNDARY'
+                    ? boundaryPortBodyRefs.current.get(wire.sourcePortIndex as string)
+                    : nodeRefs.current.get(wire.sourceNodeId as string);
+                const currentTargetRef = wire.targetNodeId === 'BOUNDARY'
+                    ? boundaryPortBodyRefs.current.get(wire.targetPortIndex as string)
+                    : nodeRefs.current.get(wire.targetNodeId as string);
+                
+                // Check if refs *and* their .current property are valid *before* rendering PhysicsWire
+                if (!currentSourceRef?.current || !currentTargetRef?.current) {
+                    console.warn(`[CanvasArea Render] Delaying wire ${wire.id} render: Refs not yet available. Source valid: ${!!currentSourceRef?.current}, Target valid: ${!!currentTargetRef?.current}`);
+                    // Return null to skip rendering this wire in this cycle.
+                    // It should render correctly in the next cycle once refs are populated.
                     return null;
                 }
-                
-                // Check definitions (TypeScript should narrow types after this)
+                // --- END NEW CHECK ---
+
+                // --- Validation (definition and port index checks remain) ---
                 if (!sourceDef || !targetDef) {
                     // console.warn(`Skipping wire ${wire.id}: Missing node definitions.`);
                     return null;
@@ -486,14 +532,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, canvasNodes, wi
                     return null;
                 }
 
-                // --- Render PhysicsWire --- 
-                // Refs, Defs, and Port Indices are validated and non-null/correct type here
+                // --- Render PhysicsWire (Refs are now confirmed valid) ---
                 return (
                   <PhysicsWire
                     key={wire.id}
                     wireId={wire.id}
-                    sourceNodeRef={sourceRef as React.RefObject<RapierRigidBody>} // Cast safe after check
-                    targetNodeRef={targetRef as React.RefObject<RapierRigidBody>} // Cast safe after check
+                    sourceNodeRef={currentSourceRef as React.RefObject<RapierRigidBody>} // Cast is safe now
+                    targetNodeRef={currentTargetRef as React.RefObject<RapierRigidBody>} // Cast is safe now
                     sourceDefinition={sourceDef}
                     targetDefinition={targetDef}
                     // Pass the numeric index for nodes, 0 for boundary
@@ -530,4 +575,4 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, canvasNodes, wi
   );
 };
 
-export default CanvasArea; 
+export default CanvasArea;

@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 export interface AtomicNodeDefinition {
   id: string; // Unique ID for the definition
   name: string;
@@ -9,9 +11,10 @@ export interface AtomicNodeDefinition {
 
 export interface CanvasNodeInstance {
   instanceId: string; // Unique ID for this specific instance on canvas
-  definitionId: string; // ID linking to the AtomicNodeDefinition
+  definitionId: string; // ID linking to the AtomicNodeDefinition OR DefinitionDefinition
   x: number;
   y: number;
+  isDefinitionInstance?: boolean; // Flag to differentiate instance types
   // Add metadata values state later
 }
 
@@ -55,5 +58,21 @@ export interface WorkspaceData {
   atomicNodes: AtomicNodeDefinition[];
   canvasNodes: CanvasNodeInstance[]; // Add canvas nodes
   wires: WireConnection[]; // Add wires array
-  // Add other state properties here later (definitions, axioms, etc.)
+  definitions: DefinitionDefinition[]; // Add definitions
+  // Add other state properties here later (axioms, etc.)
+}
+
+export interface ExternalPort {
+    id: string; // Corresponds to the original BoundaryPort ID
+    angle: number; // Store the angle for consistent layout later
+    isPrincipal: boolean; // Was the connected internal port principal?
+}
+
+export interface DefinitionDefinition {
+    id: string;
+    name: string;
+    color: string;
+    internalNodes: CanvasNodeInstance[]; // Nodes inside the definition
+    internalWires: WireConnection[];   // Wires connecting internal nodes/ports
+    externalPorts: ExternalPort[];     // Ports connecting to the outside world
 } 

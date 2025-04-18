@@ -10,7 +10,7 @@ import {
 } from '@react-three/rapier';
 import * as THREE from 'three';
 import { useThree, ThreeEvent } from '@react-three/fiber';
-import { AtomicNodeDefinition } from '../types';
+import { AtomicNodeDefinition, DefinitionDefinition } from '../types';
 import { getPortBoundaryLocalOffset } from '../utils/geometry';
 import RAPIER from '@dimforge/rapier3d-compat';
 
@@ -43,8 +43,8 @@ interface PhysicsWireProps {
     wireId: string;
     sourcePortIndex: number;
     targetPortIndex: number;
-    sourceDefinition: AtomicNodeDefinition;
-    targetDefinition: AtomicNodeDefinition;
+    sourceDefinition: AtomicNodeDefinition | DefinitionDefinition;
+    targetDefinition: AtomicNodeDefinition | DefinitionDefinition;
     sourceNodeRef: React.RefObject<RapierRigidBody>;
     targetNodeRef: React.RefObject<RapierRigidBody>;
     onDeleteWire?: (wireId: string) => void;
@@ -78,6 +78,14 @@ const PhysicsWire: React.FC<PhysicsWireProps> = ({
     onUpdateWireLength
 }) => {
 
+    // --- NEW: Explicit check for refs before proceeding ---
+    if (!sourceNodeRef.current || !targetNodeRef.current) {
+        console.warn(`[PhysicsWire ${wireId}] Render cancelled: sourceRef or targetRef is null.`);
+        return null;
+    }
+    console.log(`[PhysicsWire ${wireId}] Rendering. Source ref handle: ${sourceNodeRef.current?.handle}, Target ref handle: ${targetNodeRef.current?.handle}`);
+    // --- END NEW ---
+
     // Keep refs for segments
     const segmentRefs = useRef<React.RefObject<RapierRigidBody>[]>([]); // Refs for segment bodies
     // Dragging refs
@@ -98,13 +106,11 @@ const PhysicsWire: React.FC<PhysicsWireProps> = ({
     const segmentData = useMemo<SegmentData[]>(() => {
         // console.log(`PhysicsWire ${wireId}: useMemo for segmentData running.`);
         // Check if passed node refs are current
+        // console.log(`[PhysicsWire ${wireId}] segmentData: sourceNodeRef.current exists?`, !!sourceNodeRef.current);
+        // console.log(`[PhysicsWire ${wireId}] segmentData: targetNodeRef.current exists?`, !!targetNodeRef.current);
         const sourceBody = sourceNodeRef.current;
         const targetBody = targetNodeRef.current;
-        if (!sourceBody || !targetBody) {
-            // console.warn(`PhysicsWire ${wireId}: Node refs not current in props. Aborting segment calculation.`);
-            segmentRefs.current = [];
-            return [];
-        }
+        // Removed null check here - handled at the start of the component
         // console.log(`PhysicsWire ${wireId}: useMemo - Refs are current.`);
 
         // Calculate directly using the current bodies from refs
@@ -168,7 +174,7 @@ const PhysicsWire: React.FC<PhysicsWireProps> = ({
 
     // Depend on the passed refs' current values implicitly via source/targetBody
     // Also depend on definitions/ports/id
-    }, [sourceNodeRef, targetNodeRef, sourceDefinition, targetDefinition, sourcePortIndex, targetPortIndex, wireId, targetLength]);
+    }, [sourceDefinition, targetDefinition, sourcePortIndex, targetPortIndex, wireId, targetLength]); // Removed sourceNodeRef, targetNodeRef deps
 
     // Effect to enable joints shortly after mount
     useEffect(() => {
@@ -541,8 +547,9 @@ const SegmentSphericalJoint: React.FC<{
     anchors: [[number, number, number], [number, number, number]];
 }> = ({ refA, refB, anchors }) => {
     const shouldCreateJoint = refA.current && refB.current;
-    // console.log(`SegmentSphericalJoint: Should create joint? ${shouldCreateJoint}. RefA current: ${!!refA.current}, RefB current: ${!!refB.current}`);
+    console.log(`[SegmentSphericalJoint] Checking refs before joint creation. RefA handle: ${refA.current?.handle}, RefB handle: ${refB.current?.handle}, Should create: ${shouldCreateJoint}`);
     if (shouldCreateJoint) {
+        console.log(`[SegmentSphericalJoint] >>> Creating joint between ${refA.current.handle} and ${refB.current.handle}.`);
         // eslint-disable-next-line react-hooks/rules-of-hooks
         useSphericalJoint(refA, refB, anchors);
     }
@@ -557,17 +564,20 @@ const EndSphericalJoint: React.FC<{
     nodeAnchor: [number, number, number];
     segmentAnchor: [number, number, number];
 }> = ({ nodeRef, segmentRef, nodeAnchor, segmentAnchor }) => {
-     // Check both refs before calling hook (still good practice)
-     if (nodeRef.current && segmentRef.current) {
+    const shouldCreateJoint = nodeRef.current && segmentRef.current;
+    console.log(`[EndSphericalJoint] Checking refs before joint creation. NodeRef handle: ${nodeRef.current?.handle}, SegmentRef handle: ${segmentRef.current?.handle}, Should create: ${shouldCreateJoint}`);
+    // Check both refs before calling hook (still good practice)
+    if (shouldCreateJoint) {
         // Use spherical joint to allow rotation at the endpoints
+        console.log(`[EndSphericalJoint] >>> Creating joint between ${nodeRef.current.handle} and ${segmentRef.current.handle}.`);
         // eslint-disable-next-line react-hooks/rules-of-hooks
         useSphericalJoint(
             nodeRef,
             segmentRef,
             [nodeAnchor, segmentAnchor]
         );
-     }
-     return null;
+    }
+    return null;
 };
 
 export default PhysicsWire; 

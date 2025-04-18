@@ -9,9 +9,10 @@ import {
 } from '@react-three/rapier';
 import * as THREE from 'three';
 import { Billboard, Text } from "@react-three/drei";
-import { AtomicNodeDefinition, CanvasNodeInstance, WireConnection, NodeOrBoundaryId, PortIndexOrId } from '../types';
+import { AtomicNodeDefinition, CanvasNodeInstance, WireConnection, NodeOrBoundaryId, PortIndexOrId, DefinitionDefinition } from '../types';
 import RAPIER from '@dimforge/rapier3d-compat';
 import Port from './Port';
+import { getPortBoundaryLocalOffset } from '../utils/geometry'; // Import the geometry util
 
 // --- Constants for Visuals ---
 const NODE_RADIUS = 1.15;
@@ -26,7 +27,7 @@ export const NODE_GROUP = interactionGroups(1, [1]); // Group 1, collides with g
 
 interface PhysicsNodeProps {
   instance: CanvasNodeInstance;
-  definition: AtomicNodeDefinition;
+  definition: AtomicNodeDefinition | DefinitionDefinition;
   wires: WireConnection[];
   onDelete: (instanceId: string) => void;
   onPortPointerDown?: (ownerId: NodeOrBoundaryId, portIdOrIndex: PortIndexOrId, worldPos: THREE.Vector3, event: ThreeEvent<PointerEvent>) => void;
@@ -36,6 +37,9 @@ interface PhysicsNodeProps {
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onUpdatePhysicsData?: (instanceId: string, position: THREE.Vector3, rotation: THREE.Quaternion) => void;
+  onDoubleClick?: (instanceId: string) => void;
+  onRefReady?: (instanceId: string, ref: React.RefObject<RapierRigidBody | null>) => void;
+  onRefDestroyed?: (instanceId: string) => void;
 }
 
 // Define a type for the active joint state
@@ -97,7 +101,10 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
     onPortContextMenu,
     onDragStart,
     onDragEnd,
-    onUpdatePhysicsData
+    onUpdatePhysicsData,
+    onDoubleClick,
+    onRefReady,
+    onRefDestroyed
 }, ref) => {
 
   // Create a local ref for internal use
@@ -118,81 +125,7 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
   const [hoveredPortIndex, setHoveredPortIndex] = useState<number | null>(null);
   const planeRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0));
 
-  const radius = getNodeRadius(definition);
-
-  // --- Report physics state on change ---
-  useFrame(() => {
-      if (rigidBodyRef.current && onUpdatePhysicsData) {
-          const pos = rigidBodyRef.current.translation();
-          const rot = rigidBodyRef.current.rotation();
-          // Check if data actually changed?
-          // For now, call it every frame, App level can optimize if needed
-          onUpdatePhysicsData(
-              instance.instanceId,
-              new THREE.Vector3(pos.x, pos.y, pos.z),
-              new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w)
-          );
-      }
-  });
-
-  // --- Port Calculation Logic ---
-  const portData = useMemo(() => {
-      const results = [];
-      const totalPorts = definition.principalPorts + definition.nonPrincipalPorts;
-      const angleStep = totalPorts > 0 ? 360 / totalPorts : 0;
-
-      for (let i = 0; i < totalPorts; i++) {
-          const angleDegrees = 90 + i * angleStep;
-          const angleRad = angleDegrees * (Math.PI / 180);
-
-          // Base position on the node's circumference
-          const baseX = NODE_RADIUS * Math.cos(angleRad);
-          const baseY = NODE_RADIUS * Math.sin(angleRad);
-
-          // Rotation for the port line (pointing outwards)
-          // We want rotation around Z axis
-          const rotation = new THREE.Euler(0, 0, angleRad - Math.PI / 2, 'XYZ'); // Adjust Euler order if needed
-
-          // Check if this port is connected
-          const isConnected = wires.some((w: WireConnection) =>
-              (w.sourceNodeId === instance.instanceId && w.sourcePortIndex === i) ||
-              (w.targetNodeId === instance.instanceId && w.targetPortIndex === i)
-          );
-
-          results.push({
-              id: `port-${i}`,
-              isPrincipal: i < definition.principalPorts,
-              basePosition: new THREE.Vector3(baseX, baseY, 0), // Base position on the node edge
-              rotation: rotation, // Euler rotation object
-              isConnected: isConnected
-          });
-      }
-      return results;
-  }, [definition.principalPorts, definition.nonPrincipalPorts, wires, instance.instanceId]);
-  // --- ---
-
-  // Cleanup global listeners on unmount (belt-and-braces)
-  useEffect(() => {
-    const cleanup = () => {
-      window.removeEventListener('mousemove', handleGlobalMouseMove);
-      window.removeEventListener('mouseup', handleGlobalMouseUp);
-      // Also clean up joint if component unmounts unexpectedly during drag
-      if (activeJointRef.current) {
-        try {
-            world.removeImpulseJoint(activeJointRef.current.joint, true);
-            // Check if anchorBody exists and is still valid before removing
-            if (activeJointRef.current.anchorBody && world.bodies.get(activeJointRef.current.anchorBody.handle)) {
-                world.removeRigidBody(activeJointRef.current.anchorBody);
-            }
-        } catch (e) {
-            console.error("Error cleaning up joint on unmount:", e);
-        }
-        activeJointRef.current = null;
-      }
-    };
-    return cleanup;
-    // Add world to dependencies as it's used in cleanup
-  }, [world]); // Ensure handleGlobalMouseMove/Up refs are stable if they capture scope
+  const radius = getNodeRadius(definition as AtomicNodeDefinition);
 
   // Function to get mouse position on the Z=0 plane from Three.js event
   const getMousePlanePos = (event: ThreeEvent<PointerEvent | MouseEvent>): THREE.Vector3 => {
@@ -234,18 +167,19 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
     else if (activeJointRef.current) {
         // Update the fixed anchor body's position
         try {
-            // Check if anchorBody exists and is valid before setting translation
+            // Added existence check for safety
             if (activeJointRef.current.anchorBody && world.bodies.get(activeJointRef.current.anchorBody.handle)) {
-                 activeJointRef.current.anchorBody.setTranslation(new RAPIER.Vector3(mousePos.x, mousePos.y, 0), true);
+                activeJointRef.current.anchorBody.setTranslation(new RAPIER.Vector3(mousePos.x, mousePos.y, 0), true);
             } else {
-                 // Anchor body might have been removed unexpectedly, clean up
-                 console.warn("Anchor body not found during mouse move, cleaning up joint.");
-                 if (activeJointRef.current.joint) {
-                     world.removeImpulseJoint(activeJointRef.current.joint, true);
-                 }
-                 activeJointRef.current = null;
-                 // Potentially stop drag here as well? Or let mouse up handle it.
-                 // For now, just nullify the ref. Mouse up will handle listener removal.
+                console.warn(`[PhysicsNode ${instance.instanceId} MouseMove] Anchor body missing or invalid.`);
+                // Anchor body might have been removed unexpectedly, clean up
+                console.warn("Anchor body not found during mouse move, cleaning up joint.");
+                if (activeJointRef.current.joint) {
+                    world.removeImpulseJoint(activeJointRef.current.joint, true);
+                }
+                activeJointRef.current = null;
+                // Potentially stop drag here as well? Or let mouse up handle it.
+                // For now, just nullify the ref. Mouse up will handle listener removal.
             }
         } catch (e) {
             console.error("Error setting anchor body translation:", e);
@@ -259,7 +193,7 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
              activeJointRef.current = null;
         }
     }
-  }, [camera, gl, world]); // Add world dependency
+  }, [camera, gl, world, instance.instanceId]); // Add world dependency
 
   // Global mouse up handler
   const handleGlobalMouseUp = useCallback(() => {
@@ -291,10 +225,15 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
         console.log("Ending joint drag");
         needsDragEndCallback = true;
         try {
+            console.log(`[PhysicsNode ${instance.instanceId} MouseUp] Removing joint.`);
             world.removeImpulseJoint(activeJointRef.current.joint, true);
              // Check if anchorBody exists and is still valid before removing
              if (activeJointRef.current.anchorBody && world.bodies.get(activeJointRef.current.anchorBody.handle)) {
+                 console.log(`[PhysicsNode ${instance.instanceId} MouseUp] Removing anchor body.`);
+                 console.log(`[PhysicsNode ${instance.instanceId} MouseUp] >>> Removing anchor body handle: ${activeJointRef.current.anchorBody.handle}`);
                  world.removeRigidBody(activeJointRef.current.anchorBody);
+             } else {
+                 console.log(`[PhysicsNode ${instance.instanceId} MouseUp] Anchor body already removed or invalid.`);
              }
         } catch (e) {
             console.error("Error removing joint/anchor body on mouse up:", e);
@@ -316,7 +255,118 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
           onDragEnd?.();
       }
     }
-  }, [onDragEnd, world]); // Add world dependency
+  }, [onDragEnd, handleGlobalMouseMove, instance.instanceId, world]); // Add world dependency
+
+  // --- Report physics state on change ---
+  useFrame(() => {
+      if (rigidBodyRef.current && onUpdatePhysicsData) {
+          const pos = rigidBodyRef.current.translation();
+          const rot = rigidBodyRef.current.rotation();
+          // Check if data actually changed?
+          // For now, call it every frame, App level can optimize if needed
+          onUpdatePhysicsData(
+              instance.instanceId,
+              new THREE.Vector3(pos.x, pos.y, pos.z),
+              new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w)
+          );
+      }
+  });
+
+  // --- Port Calculation Logic ---
+  const portData = useMemo(() => {
+      const results = [];
+      const isAtomic = 'principalPorts' in definition;
+      const totalPorts = isAtomic 
+          ? definition.principalPorts + definition.nonPrincipalPorts 
+          : definition.externalPorts.length;
+
+      if (totalPorts === 0) return [];
+
+      for (let i = 0; i < totalPorts; i++) {
+          // Use the updated geometry function which handles both types
+          const portOffset = getPortBoundaryLocalOffset(definition, i);
+          const basePosition = portOffset; // Offset is the position
+          
+          // Calculate rotation based on the offset angle
+          const angleRad = Math.atan2(portOffset.y, portOffset.x);
+          const rotation = new THREE.Euler(0, 0, angleRad - Math.PI / 2, 'XYZ');
+
+          // Base position on the node's circumference
+          const baseX = NODE_RADIUS * Math.cos(angleRad);
+          const baseY = NODE_RADIUS * Math.sin(angleRad);
+
+          // Check if this port is connected
+          const isConnected = wires.some((w: WireConnection) =>
+              (w.sourceNodeId === instance.instanceId && w.sourcePortIndex === i) ||
+              (w.targetNodeId === instance.instanceId && w.targetPortIndex === i)
+          );
+
+          results.push({
+              id: `port-${i}`,
+              isPrincipal: isAtomic 
+                  ? (i < definition.principalPorts) 
+                  : definition.externalPorts[i].isPrincipal,
+              basePosition: new THREE.Vector3(baseX, baseY, 0), // Base position on the node edge
+              rotation: rotation, // Euler rotation object
+              isConnected: isConnected
+          });
+      }
+      return results;
+  }, [definition, wires, instance.instanceId]);
+  // --- ---
+
+  // Cleanup global listeners on unmount (belt-and-braces)
+  useEffect(() => {
+    const cleanup = () => {
+      window.removeEventListener('mousemove', handleGlobalMouseMove);
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+      // Also clean up joint if component unmounts unexpectedly during drag
+      if (activeJointRef.current) {
+        try {
+            console.log(`[PhysicsNode ${instance.instanceId} Cleanup] Removing joint (Joint Handle: ${activeJointRef.current.joint.handle}).`);
+            world.removeImpulseJoint(activeJointRef.current.joint, true);
+            // Check if anchorBody exists and is still valid before removing
+            if (activeJointRef.current.anchorBody && world.bodies.get(activeJointRef.current.anchorBody.handle)) {
+                console.log(`[PhysicsNode ${instance.instanceId} Cleanup] Removing anchor body (Body Handle: ${activeJointRef.current.anchorBody.handle}).`);
+                console.log(`[PhysicsNode ${instance.instanceId} Cleanup] >>> Removing anchor body handle: ${activeJointRef.current.anchorBody.handle}`);
+                world.removeRigidBody(activeJointRef.current.anchorBody);
+            } else {
+                console.log(`[PhysicsNode ${instance.instanceId} Cleanup] Anchor body already removed or invalid.`);
+            }
+        } catch (e) {
+            console.error(`[PhysicsNode ${instance.instanceId} Cleanup] Error cleaning up joint:`, e);
+        }
+        activeJointRef.current = null;
+      }
+    };
+    return cleanup;
+    // Add world to dependencies as it's used in cleanup
+  }, [world, handleGlobalMouseMove, handleGlobalMouseUp, instance.instanceId]); // Ensure handleGlobalMouseMove/Up refs are stable + instanceId for logging
+
+  // --- Log Mount/Unmount --- 
+  useEffect(() => {
+      console.log(`[PhysicsNode ${instance.instanceId}] Mounted.`);
+      return () => {
+          console.log(`[PhysicsNode ${instance.instanceId}] Unmounting.`);
+      };
+  }, [instance.instanceId]);
+  // --- --- 
+
+  // --- Effect to report ref readiness --- 
+  useEffect(() => {
+      if (rigidBodyRef.current) {
+          console.log(`[PhysicsNode ${instance.instanceId}] Ref ready, reporting.`);
+          onRefReady?.(instance.instanceId, rigidBodyRef);
+      }
+      // Cleanup function to report destruction
+      return () => {
+          console.log(`[PhysicsNode ${instance.instanceId}] Ref destroyed, reporting.`);
+          onRefDestroyed?.(instance.instanceId);
+      };
+  // Trigger when the ref's current value *might* change (mount/unmount) 
+  // or when callbacks change (though unlikely)
+  }, [instance.instanceId, onRefReady, onRefDestroyed]);
+  // --- --- 
 
   // Handle pointer down
   const handlePointerDown = useCallback((event: ThreeEvent<PointerEvent>) => {
@@ -376,9 +426,12 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
         setIsShiftDragging(false);
 
         try {
+            console.log(`[PhysicsNode ${instance.instanceId} PointerDown] Creating anchor body at`, clickPos);
             // Create a fixed anchor body at the click position
             const anchorDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(clickPos.x, clickPos.y, 0);
+            console.log(`[PhysicsNode ${instance.instanceId} PointerDown] >>> Creating anchor body...`);
             const anchorBody = world.createRigidBody(anchorDesc);
+            console.log(`[PhysicsNode ${instance.instanceId} PointerDown] Anchor body created, handle:`, anchorBody?.handle);
 
             // Calculate joint anchor points
             const bodyPosVec = rigidBodyRef.current.translation();
@@ -412,15 +465,24 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
 
             if (!bodyA || !bodyB) throw new Error("Could not get bodies for joint creation");
 
+            console.log(`[PhysicsNode ${instance.instanceId} PointerDown] Creating joint between body ${bodyA.handle} and anchor ${bodyB.handle}.`);
+            console.log(`[PhysicsNode ${instance.instanceId} PointerDown] >>> Creating impulse joint...`);
             const joint = world.createImpulseJoint(jointParams, bodyA, bodyB, true);
+            console.log(`[PhysicsNode ${instance.instanceId} PointerDown] Joint created.`);
 
             activeJointRef.current = { joint, anchorBody }; // Store joint and anchor body API
 
         } catch (e) {
             console.error("Failed to create revolute joint:", e);
             // Clean up if joint creation failed
+            console.log(`[PhysicsNode ${instance.instanceId} PointerDown] Cleaning up anchor body due to joint creation failure.`);
             if (activeJointRef.current?.anchorBody) {
-                 world.removeRigidBody(activeJointRef.current.anchorBody);
+                try {
+                    console.log(`[PhysicsNode ${instance.instanceId} PointerDown Error Cleanup] >>> Removing anchor body handle: ${activeJointRef.current.anchorBody.handle}`);
+                    world.removeRigidBody(activeJointRef.current.anchorBody);
+                } catch (cleanupError) {
+                    console.error("[PhysicsNode PointerDown] Error during anchor body cleanup:", cleanupError);
+                }
             }
             activeJointRef.current = null;
             isDraggingRef.current = false; // Reset dragging state
@@ -439,6 +501,14 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
     console.log("Context Menu on node:", instance.instanceId);
     // No longer directly deletes, calls unified handler
     onPortContextMenu?.(instance.instanceId, -1, event); // Pass instanceId, -1 for port index (node context), and event
+  };
+
+  const handleDoubleClick = (event: ThreeEvent<MouseEvent>) => {
+      // Only trigger if clicking the main body, not text/ports
+      if (event.object !== event.eventObject) return;
+      event.stopPropagation();
+      console.log("Double click on node:", instance.instanceId);
+      onDoubleClick?.(instance.instanceId); // Call the handler passed from App
   };
 
   const handlePortPointerDown = (event: ThreeEvent<PointerEvent>, portIndex: number) => {
@@ -486,6 +556,7 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
         <mesh
             onPointerDown={handlePointerDown}
             onContextMenu={handleContextMenu}
+            onDoubleClick={handleDoubleClick}
         >
              <circleGeometry args={[NODE_RADIUS, 32]} />
              <meshStandardMaterial color={definition.color} emissive={definition.color} emissiveIntensity={0.2} side={THREE.DoubleSide} />
