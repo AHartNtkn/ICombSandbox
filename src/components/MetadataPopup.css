@@ -1,0 +1,108 @@
+.metadata-popup-overlay {
+  position: fixed; /* Use fixed to cover the whole viewport */
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.5); /* Darker overlay */
+  z-index: 999; /* Ensure it's above other content but below potential higher modals */
+  /* No internal padding or margin, the content div handles positioning */
+}
+
+.metadata-popup-content {
+  background-color: #282c34; /* Dark background */
+  color: #abb2bf; /* Light grey text */
+  border: 1px solid #4a4f5a;
+  border-radius: 5px;
+  padding: 15px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+  min-width: 280px; /* Ensure a reasonable minimum width */
+  z-index: 1000; /* Ensure popup content is above the overlay */
+}
+
+.metadata-popup-content h3 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  font-size: 1.1em;
+  color: #61afef; /* Brighter color for heading */
+  border-bottom: 1px solid #4a4f5a;
+  padding-bottom: 10px;
+}
+
+.metadata-field {
+  margin-bottom: 12px;
+}
+
+.metadata-field label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+  font-size: 0.95em;
+  color: #e5c07b; /* Color for labels */
+}
+
+/* NEW: Style for the row containing input and checkbox */
+.metadata-input-row {
+  display: flex;
+  align-items: center;
+}
+
+.metadata-field input[type="text"] {
+  flex-grow: 1; /* Take available space */
+  background-color: #3a3f4a; /* Darker input background */
+  color: #abb2bf; /* Light text */
+  border: 1px solid #4a4f5a;
+  border-radius: 3px;
+  padding: 6px 8px;
+  font-size: 0.9em;
+  margin-right: 10px; /* Space before checkbox */
+}
+
+.metadata-field input[type="text"]:focus {
+  outline: none;
+  border-color: #61afef; 
+  box-shadow: 0 0 0 1px #61afef;
+}
+
+/* NEW: Style for the visibility checkbox */
+.visibility-checkbox {
+  cursor: pointer;
+  /* Basic styling, can be customized further */
+  width: 16px;
+  height: 16px;
+  accent-color: #98c379; /* Accent color for the checkmark */
+}
+
+.metadata-popup-buttons {
+  margin-top: 20px;
+  text-align: right;
+  padding-top: 15px;
+  border-top: 1px solid #4a4f5a;
+}
+
+.metadata-popup-buttons button {
+  margin-left: 10px;
+  padding: 7px 14px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: bold;
+  border: none;
+}
+
+.metadata-popup-buttons button[type="submit"] {
+  background-color: #61afef; /* Blue save button */
+  color: #282c34; /* Dark text */
+}
+
+.metadata-popup-buttons button[type="submit"]:hover {
+  background-color: #529cdb;
+}
+
+.metadata-popup-buttons button[type="button"] {
+  background-color: #4a4f5a; /* Grey cancel button */
+  color: #abb2bf;
+}
+
+.metadata-popup-buttons button[type="button"]:hover {
+  background-color: #555a66;
+} 

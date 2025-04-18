@@ -104,6 +104,8 @@ function App() {
       definitionId: actualId, // Use the extracted ID
       x,
       y,
+      metadataValues: {}, // Initialize metadata values
+      metadataVisibility: {}, // Initialize metadata visibility
       ...(isDefinition && { isDefinitionInstance: true }) // Add flag if it's a definition
     };
     setCanvasNodes((prevCanvasNodes) => [...prevCanvasNodes, newNodeInstance]);
@@ -222,6 +224,22 @@ function App() {
     console.log(`Deleting wire ${wireIdToDelete}`);
     setWires(prev => prev.filter(w => w.id !== wireIdToDelete));
   }, [setWires]);
+
+  // --- Update Instance Metadata & Visibility --- 
+  const updateInstanceMetadata = useCallback((instanceId: string, newValues: Record<string, string | number | boolean>, newVisibility: Record<string, boolean>) => {
+    setCanvasNodes(prevNodes => 
+      prevNodes.map(node => 
+        node.instanceId === instanceId 
+          ? { 
+              ...node, 
+              metadataValues: newValues, // Update values
+              metadataVisibility: newVisibility // Update visibility
+            } 
+          : node
+      )
+    );
+    console.log(`Updated metadata for ${instanceId}:`, newValues, newVisibility);
+  }, [setCanvasNodes]);
 
   // --- Add Wire Length Update Handler ---
   const handleUpdateWireLength = useCallback((wireId: string, newLength: number) => {
@@ -872,6 +890,7 @@ function App() {
           setWires={setWires}
           onAddDefinitionClick={handleAddDefinitionClick} // Pass handler
           onExpandDefinition={expandDefinitionInstance} // Pass expansion handler
+          onUpdateInstanceMetadata={updateInstanceMetadata} // Pass metadata update handler
         />
       </div>
 

@@ -40,6 +40,7 @@ interface PhysicsNodeProps {
   onDoubleClick?: (instanceId: string) => void;
   onRefReady?: (instanceId: string, ref: React.RefObject<RapierRigidBody | null>) => void;
   onRefDestroyed?: (instanceId: string) => void;
+  onOpenMetadataPopup?: (instanceId: string, event: ThreeEvent<MouseEvent>) => void;
 }
 
 // Define a type for the active joint state
@@ -104,7 +105,8 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
     onUpdatePhysicsData,
     onDoubleClick,
     onRefReady,
-    onRefDestroyed
+    onRefDestroyed,
+    onOpenMetadataPopup
 }, ref) => {
 
   // Create a local ref for internal use
@@ -498,17 +500,32 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
   }, [getMousePlanePos, handleGlobalMouseMove, handleGlobalMouseUp, onDragStart, onDragEnd, instance.instanceId, world]); // Add world, onDragEnd
 
   const handleContextMenu = (event: ThreeEvent<MouseEvent>) => {
-    console.log("Context Menu on node:", instance.instanceId);
-    // No longer directly deletes, calls unified handler
-    onPortContextMenu?.(instance.instanceId, -1, event); // Pass instanceId, -1 for port index (node context), and event
+    event.stopPropagation(); // Prevent canvas context menu
+    // Implement custom context menu logic later if needed
+    console.log("Node context menu");
+    // Example: Delete on right click for now
+    onDelete(instance.instanceId);
   };
 
   const handleDoubleClick = (event: ThreeEvent<MouseEvent>) => {
-      // Only trigger if clicking the main body, not text/ports
-      if (event.object !== event.eventObject) return;
-      event.stopPropagation();
-      console.log("Double click on node:", instance.instanceId);
-      onDoubleClick?.(instance.instanceId); // Call the handler passed from App
+       // Only trigger if clicking the main body, not text/ports
+       // if (event.object !== event.eventObject) return; // This check might be too strict, let's test without it first.
+       event.stopPropagation();
+       console.log("Node double-clicked:", instance.instanceId);
+       // --- UPDATED --- 
+       // If it's an atomic node, open the metadata popup
+       if (!instance.isDefinitionInstance && onOpenMetadataPopup) {
+           console.log("-> Atomic node, calling onOpenMetadataPopup");
+           onOpenMetadataPopup(instance.instanceId, event);
+       } 
+       // If it's a definition instance, call the expansion handler
+       else if (instance.isDefinitionInstance && onDoubleClick) {
+           console.log("-> Definition node, calling onDoubleClick (for expansion)");
+           onDoubleClick(instance.instanceId);
+       } else {
+           console.log("-> Double click condition not met (isDefinitionInstance:", instance.isDefinitionInstance, ", has onOpenMetadataPopup:", !!onOpenMetadataPopup, ", has onDoubleClick:", !!onDoubleClick, ")");
+       }
+       // --- END UPDATED ---
   };
 
   const handlePortPointerDown = (event: ThreeEvent<PointerEvent>, portIndex: number) => {
@@ -580,23 +597,60 @@ const PhysicsNode = forwardRef<RapierRigidBody, PhysicsNodeProps>(({
                 onPointerEnter={onPortPointerEnter}
                 onPointerLeave={onPortPointerLeave}
                 onContextMenu={onPortContextMenu} 
-                // Add visual config if needed (radius, color)
             />
         ))}
       </group>
 
-      {/* Non-rotating Label */}
-      <Billboard position={[0, 0, 0.1]}>
-        <Text
-          fontSize={LABEL_FONT_SIZE}
-          color="black"
-          anchorX="center"
-          anchorY="middle"
-          outlineWidth={0.03}
-          outlineColor="#ffffff"
-        >
-          {definition.name}
-        </Text>
+      {/* Non-rotating Label and Metadata */}
+      <Billboard position={[0, 0, 0.1]}> 
+        {(() => { // Use a function to calculate positions based on metadata
+          const visibleMetadataFields = !instance.isDefinitionInstance 
+            ? (definition as AtomicNodeDefinition).metadataSchema?.filter(
+                (fieldName: string) => instance.metadataVisibility?.[fieldName] && instance.metadataValues?.[fieldName] != null
+              ) || [] 
+            : [];
+          const numVisibleMetadata = visibleMetadataFields.length;
+          
+          // Calculate vertical offset to center the block
+          // Approximate total lines = 1 (name) + numVisibleMetadata
+          // Approximate height per line = LABEL_FONT_SIZE
+          // Approximate spacing = LABEL_FONT_SIZE * 0.2
+          // Offset shifts the center up by roughly half the metadata height
+          const verticalOffset = (numVisibleMetadata * LABEL_FONT_SIZE * 0.95) / 2; // Adjust 0.95 multiplier for spacing
+
+          return (
+            <> {/* Use Fragment to return multiple elements */}
+              <Text
+                position={[0, verticalOffset, 0]} // Apply vertical offset to name
+                fontSize={LABEL_FONT_SIZE}
+                color="#ffffff" // White color for better contrast on dark nodes
+                anchorX="center"
+                anchorY="middle"
+                outlineWidth={0.02}
+                outlineColor="#000000"
+              >
+                {definition.name}
+              </Text>
+              
+              {/* Render Visible Metadata relative to the shifted name */}
+              {visibleMetadataFields.map((fieldName: string, index: number) => (
+                <Text
+                  key={fieldName}
+                  // Position below the name, accounting for offset and index
+                  position={[0, verticalOffset - LABEL_FONT_SIZE * (1.1 + index * 0.9), 0]} 
+                  fontSize={LABEL_FONT_SIZE * 0.75} // Smaller font for metadata
+                  color="#abb2bf" // Light grey for metadata
+                  anchorX="center"
+                  anchorY="middle"
+                  outlineWidth={0.01}
+                  outlineColor="#000000"
+                >
+                  {`${fieldName}: ${instance.metadataValues?.[fieldName]}`}
+                </Text>
+              ))}
+            </>
+          );
+        })()}
       </Billboard>
 
       {/* Explicit Collider */}

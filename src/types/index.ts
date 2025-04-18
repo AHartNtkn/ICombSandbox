@@ -15,6 +15,8 @@ export interface CanvasNodeInstance {
   x: number;
   y: number;
   isDefinitionInstance?: boolean; // Flag to differentiate instance types
+  metadataValues?: Record<string, string | number | boolean>; // Values for metadata fields defined in AtomicNodeDefinition
+  metadataVisibility?: Record<string, boolean>; // Visibility state for metadata fields
   // Add metadata values state later
 }
 

@@ -12,6 +12,7 @@ import PhysicsWire from './PhysicsWire';
 import './CanvasArea.css';
 import Boundary from './Boundary';
 import { ThreeEvent } from '@react-three/fiber';
+import MetadataPopup from './MetadataPopup';
 
 interface CanvasAreaProps {
   atomicNodeDefs: AtomicNodeDefinition[];
@@ -34,6 +35,7 @@ interface CanvasAreaProps {
   setWires: Dispatch<SetStateAction<WireConnection[]>>;
   onAddDefinitionClick: () => void;
   onExpandDefinition?: (instanceId: string) => void;
+  onUpdateInstanceMetadata: (instanceId: string, newValues: Record<string, string | number | boolean>, newVisibility: Record<string, boolean>) => void;
 }
 
 // Helper function to manage orbit controls enabling/disabling
@@ -51,7 +53,7 @@ const useDragControls = (setControlsEnabled: React.Dispatch<React.SetStateAction
   return { handleDragStart, handleDragEnd };
 };
 
-const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, definitionDefs, canvasNodes, wires, drawingWire, onAddNode, onDeleteNode, onStartWire, onUpdateWireEnd, onFinishWire, onDeleteWire, onUpdateWireLength, onUpdateNodePhysicsData, isBoundaryActive, boundaryPorts, addBoundaryPort, deleteBoundaryPort, setWires, onAddDefinitionClick, onExpandDefinition }) => {
+const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, definitionDefs, canvasNodes, wires, drawingWire, onAddNode, onDeleteNode, onStartWire, onUpdateWireEnd, onFinishWire, onDeleteWire, onUpdateWireLength, onUpdateNodePhysicsData, isBoundaryActive, boundaryPorts, addBoundaryPort, deleteBoundaryPort, setWires, onAddDefinitionClick, onExpandDefinition, onUpdateInstanceMetadata }) => {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const wireTargetRef = useRef<{ nodeId: NodeOrBoundaryId; portIndex: PortIndexOrId } | null>(null);
 
@@ -86,6 +88,29 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, definitionDefs,
          // setRefsReadyTrigger(prev => prev + 1);
     }
   }, []);
+  // <--- END NEW
+
+  // ---> NEW: Metadata Popup State and Handlers
+  const [metadataPopupState, setMetadataPopupState] = useState<{ instanceId: string, screenX: number, screenY: number } | null>(null);
+
+  const handleOpenMetadataPopup = useCallback((instanceId: string, event: ThreeEvent<MouseEvent>) => {
+      // Make sure the event has client coordinates
+      if (event.clientX && event.clientY) {
+        console.log(`Opening metadata popup for ${instanceId} at (${event.clientX}, ${event.clientY})`);
+        setMetadataPopupState({ instanceId, screenX: event.clientX, screenY: event.clientY });
+      } else {
+        console.warn("Could not open metadata popup: Event missing client coordinates.");
+      }
+  }, []);
+
+  const handleCloseMetadataPopup = useCallback(() => {
+      setMetadataPopupState(null);
+  }, []);
+
+  const handleSaveMetadata = useCallback((instanceId: string, newValues: Record<string, string | number | boolean>, newVisibility: Record<string, boolean>) => {
+      onUpdateInstanceMetadata(instanceId, newValues, newVisibility);
+      handleCloseMetadataPopup();
+  }, [onUpdateInstanceMetadata, handleCloseMetadataPopup]);
   // <--- END NEW
 
   const getMousePlanePosFromEvent = useCallback((event: MouseEvent | PointerEvent): THREE.Vector3 | null => {
@@ -448,6 +473,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, definitionDefs,
                   onDoubleClick={onExpandDefinition}
                   onRefReady={handleRefReady}
                   onRefDestroyed={handleRefDestroyed}
+                  onOpenMetadataPopup={handleOpenMetadataPopup}
                 />
               );
             })}
@@ -571,6 +597,37 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ atomicNodeDefs, definitionDefs,
 
         <ManualDrawingLine drawingWire={drawingWire} />
       </Canvas>
+      
+      {/* Metadata Popup Rendering */}
+      {metadataPopupState && (() => {
+          const instance = canvasNodes.find(n => n.instanceId === metadataPopupState.instanceId);
+          // Ensure it's an atomic node instance
+          const definition = instance && !instance.isDefinitionInstance 
+              ? findAtomicDef(instance.definitionId) 
+              : undefined; 
+          
+          if (!instance || !definition) {
+              // This might happen briefly if the node is deleted while popup is open
+              // Or if somehow it was opened for a non-atomic node. Close it.
+              if (metadataPopupState) { // Avoid potential loop if already null
+                  handleCloseMetadataPopup();
+              }
+              return null;
+          }
+
+          return (
+              <MetadataPopup
+                  key={instance.instanceId} // Ensure re-render if instance changes
+                  definition={definition}
+                  initialValues={instance.metadataValues || {}} // Pass current or empty values
+                  initialVisibility={instance.metadataVisibility || {}} // Pass current or empty visibility
+                  screenX={metadataPopupState.screenX}
+                  screenY={metadataPopupState.screenY}
+                  onSave={(newValues, newVisibility) => handleSaveMetadata(instance.instanceId, newValues, newVisibility)}
+                  onClose={handleCloseMetadataPopup}
+              />
+          );
+      })()}
     </div>
   );
 };
